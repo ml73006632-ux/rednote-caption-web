@@ -1,27 +1,25 @@
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import yt_dlp
 import os
 import uuid
 
 app = Flask(__name__)
+CORS(app)
 
 DOWNLOAD_DIR = "/tmp/videos"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-@app.get("/")
+@app.route("/")
 def home():
-    return """
-    <h1>🎬 MM Caption API</h1>
-    <p>RedNote Downloader is ready.</p>
-    """
+    return "MM Caption API - RedNote Downloader is running"
 
 
-@app.post("/api/download")
+@app.route("/api/download", methods=["POST"])
 def download_video():
 
     data = request.get_json(silent=True) or {}
-
     url = data.get("url", "").strip()
 
     if not url:
@@ -30,23 +28,24 @@ def download_video():
             "error": "RedNote link ထည့်ပါ"
         }), 400
 
-    filename = str(uuid.uuid4())
+    job_id = str(uuid.uuid4())
 
     output = os.path.join(
         DOWNLOAD_DIR,
-        filename
+        job_id + ".%(ext)s"
     )
 
-    ydl_opts = {
-        "outtmpl": output + ".%(ext)s",
+    options = {
+        "outtmpl": output,
         "format": "best",
         "noplaylist": True,
-        "quiet": True
+        "quiet": True,
+        "no_warnings": True
     }
 
     try:
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(options) as ydl:
 
             info = ydl.extract_info(
                 url,
@@ -55,10 +54,24 @@ def download_video():
 
             filepath = ydl.prepare_filename(info)
 
+        if not os.path.exists(filepath):
+
+            return jsonify({
+                "success": False,
+                "error": "Video file မတွေ့ပါ"
+            }), 500
+
+        filename = os.path.basename(filepath)
+
         return jsonify({
             "success": True,
-            "title": info.get("title", "RedNote Video"),
-            "video_url": "/api/video/" + os.path.basename(filepath)
+            "title": info.get(
+                "title",
+                "RedNote Video"
+            ),
+            "filename": filename,
+            "video_url":
+                "/api/video/" + filename
         })
 
     except Exception as e:
@@ -69,15 +82,17 @@ def download_video():
         }), 500
 
 
-@app.get("/api/video/<filename>")
+@app.route("/api/video/<filename>")
 def get_video(filename):
+
+    filename = os.path.basename(filename)
 
     filepath = os.path.join(
         DOWNLOAD_DIR,
         filename
     )
 
-    if not os.path.exists(filepath):
+    if not os.path.isfile(filepath):
 
         return jsonify({
             "success": False,
@@ -86,12 +101,21 @@ def get_video(filename):
 
     return send_file(
         filepath,
-        as_attachment=True
+        as_attachment=True,
+        download_name=filename
     )
 
 
 if __name__ == "__main__":
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            10000
+        )
+    )
+
     app.run(
         host="0.0.0.0",
-        port=10000
+        port=port
     )
